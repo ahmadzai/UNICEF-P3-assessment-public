@@ -1,0 +1,20 @@
+---
+title: "P3 Assessment - Solution"
+author: "WXXXX KXXX AXXXXXXX"
+date: "2024-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+# General options for code chunks
+knitr::opts_chunk$set(echo = FALSE, 
+                      comment = "",
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+## Task1 - Solution
+In task one, although all the data-sets were already existed in the `01_rawdata`, and the [LINK](https://data.unicef.org/resources/data_explorer/unicef_f/?ag=UNICEF&df=GLOBAL_DATAFLOW&ver=1.0&dq=.MNCH_ANC4+MNCH_SAB.&startPeriod=2018&endPeriod=2022) was also provided for the external data-set. Normally the data can be pulled from webpages and URLs with simple `R Script` or HTTP requests. However, in this case I browsed the URL in a browser and downloaded the data in an Excel file (from the download option on the page) and I also added the Excel file in the `01_rawdata` folder. The reason was that reading data from a URL which loads data dynamically using JavaScript/AJAX, that needed some advanced techniques and some libraries that needed to be compiled locally e.g., `RSelenium` and some others, and I thought that might not be needed for this exercise. In a real word, this data can be extracted from the Indicator Data Warehouse (SDMX). 
+
+
