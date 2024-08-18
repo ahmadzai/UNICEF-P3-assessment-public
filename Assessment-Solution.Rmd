@@ -14,7 +14,168 @@ knitr::opts_chunk$set(echo = FALSE,
                       message = FALSE)
 ```
 
+```{r packages, warning=FALSE, message=FALSE, echo=FALSE}
+
+## Install function to install and load multiple R packages.
+## check to see if packages are installed. Install them if they are not, then load them into the R session
+
+install <- function(pkg){
+  # check the provided list of packages if they are installed or not
+  # extract only those which are not installed
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    # in case there were packages which were not installed yet, they will be installed
+    # from provided repository
+    install.packages(new.pkg, dependencies = TRUE, repos = "http://cran.us.r-project.org")
+  # load all the packages to the R Env
+  sapply(pkg, require, character.only = TRUE)
+}
+
+```
+
 ## Task1 - Solution
 In task one, although all the data-sets were already existed in the `01_rawdata`, and the [LINK](https://data.unicef.org/resources/data_explorer/unicef_f/?ag=UNICEF&df=GLOBAL_DATAFLOW&ver=1.0&dq=.MNCH_ANC4+MNCH_SAB.&startPeriod=2018&endPeriod=2022) was also provided for the external data-set. Normally the data can be pulled from webpages and URLs with simple `R Script` or HTTP requests. However, in this case I browsed the URL in a browser and downloaded the data in an Excel file (from the download option on the page) and I also added the Excel file in the `01_rawdata` folder. The reason was that reading data from a URL which loads data dynamically using JavaScript/AJAX, that needed some advanced techniques and some libraries that needed to be compiled locally e.g., `RSelenium` and some others, and I thought that might not be needed for this exercise. In a real word, this data can be extracted from the Indicator Data Warehouse (SDMX). 
 
+```{r common_packages, warning=FALSE, message=FALSE, echo=FALSE}
+# Load the common packages for this exercise
+invisible(install(c("readxl", "dplyr", "tidyverse", "stringr")))
 
+```
+
+### Step1: 
+Load, clean and transform the Data downloaded from the DATA.UNICEF.ORG Webiste (Provided URL)
+
+```{r load_wh_data, echo=FALSE}
+
+# Load Data Downloaded from OPEN.DATA.UNICEF, Clean and Transform it a little bit
+# Skipping the first 2 rows, those are the merged column headers, we don't need them here
+anc_sub_data <- read_excel(path = "01_rawdata/GLOBAL_DATAFLOW_2018-2022.xlsx", skip = 2) %>% suppressMessages()
+
+# Assign new column names to the data-set
+colnames(anc_sub_data) <- c("Country", "Indicator", "Gender", "2022", "2021", "2020", "2019", "2018")
+
+# Make some cleaning and transformation
+anc_sub_data <- anc_sub_data %>% 
+  filter(!is.na(Indicator)) %>% # remove the extra rows at the end of the data-set in Excel
+  # Replace - with NA in all data columns/rows
+  mutate(across(all_of(c("2022", "2021", "2020", "2019", "2018")), ~ na_if(., "-"))) %>%
+  # Add a new column and put the value of latest year there (non-NA value). 
+  mutate(Latest_Value = coalesce(`2022`, `2021`, `2020`, `2019`, `2018`))
+
+# Show a sample of the data
+# let's make the table a bit nicer
+knitr::kable(head(anc_sub_data))
+
+```
+
+### Step 2:
+Load the SDG Status Analysis of Under5 Mortality Target by Countries, clean and transform as needed and merge it with the `ANC & SUB Indicators Data`, prepared above
+
+```{r load_sdg_on_off_data, echo=FALSE}
+# Load On-Off-Track Data
+on_off_track_sdgs <- read_excel(path = "01_rawdata/On-track and off-track countries.xlsx") %>% suppressMessages()
+
+# Print a sample of the data
+knitr::kable(head(on_off_track_sdgs))
+
+```
+
+Print a sample of the merged data:
+```{r merge_data, echo=FALSE}
+
+# Now merging the two data-sets, will need left join, because in our indicators data set we have extra locations' categories (Africa, America, etc. etc.), Which we don't have in the ON-OFF Track SDGs data, which is only by Country - so everything from the first data-set will be included and matched ones from the second data-set. 
+merged_dataset <- left_join(anc_sub_data, on_off_track_sdgs, by = c("Country" = "OfficialName"))
+
+knitr::kable(head(merged_dataset))
+
+```
+
+### Step 3: 
+Load the Demographic Data - which has the Birth Rate Projection, there are two sheets in that Excel Workbook, the Projections sheet will be loaded as it has the Birth Rate Projection. 
+Some transformation and filtering (to filter only 2022 projection) is also performed and it is merged with the data prepared above. In this step a sample of data is not shown because the data-set have many columns. 
+
+```{r load_projection_data, echo=FALSE}
+
+# Skipping 16 first rows, that's not the data, there are some merged cells and titles
+# also setting the guess_max parameters, so R can guess the column type properly. 
+birth_rate_projection <- read_excel(path = "01_rawdata/WPP2022_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT_REV1.xlsx", guess_max = 5000, sheet = "Projections", skip = 16) %>% suppressMessages()
+
+# remove other years projection, keep only 2022
+birth_rate_projection <- birth_rate_projection %>% 
+  filter(Year == 2022)
+
+# rename column 3
+names(birth_rate_projection)[3] <- "Region_SubRegion_Country_Area"
+
+# head(birth_rate_projection)
+# merge with data prepared above - again it will be a left_join
+merged_dataset <- left_join(merged_dataset, birth_rate_projection, by = c("Country" = "Region_SubRegion_Country_Area"))
+
+```
+
+### Final Step:
+As the data is ready, in this step Weighted Coverage will be calculated as per the provided formula.  The `group_by` and `summarise` functions were used for this purpose, including SUM, Multiplication and Division. As instructed,only the calculation for Countries is needed, therefore the other type of locations are filtered out, also the data has been prepared for the calculation (e.g., changing the datatypes of the columns, etc.). The long indicators names were also replaced by shorter names, to look better on the visualization/chart. 
+
+```{r weighted_coverage, echo=FALSE}
+
+wc_calc <- merged_dataset %>%
+  # only keep the Countries
+  filter(!is.na(ISO3Code)) %>%
+  # change the datatype to numeric (the data is in thousands, we will keep as is even if we multiply by 1000, the final result of the formula will not change)
+  mutate(`Births (thousands)` = as.numeric(`Births (thousands)`)) %>%
+  mutate(Latest_Value = as.numeric(Latest_Value)) %>%
+  # Keep only two categories (On/Off Track)
+  mutate(SDG_Status_U5MR = ifelse(
+    Status.U5MR == "Achieved" | Status.U5MR == "On Track", "On Track", "Off Track"
+  )) %>%
+  # replace the long text to shorter text - indicators
+  mutate(Indicator = case_when(
+    str_detect(Indicator, "^Antenatal care 4") ~ "Antenatal care 4+ visits (ANC4)",
+    str_detect(Indicator, "^Skilled birth attendant") ~ "Skilled birth attendant (SAB)",
+    TRUE ~ Indicator
+  )) %>%
+  # We need the result to be by Indicator and by SDG Status - Group by them
+  group_by(Indicator, SDG_Status_U5MR) %>%
+  summarise(
+    # Sum of Countries Coverage * Birth Rate Projection / Sum of Birth Rate Projection - Keep NA Removed
+    Weighted_Coverage = sum(Latest_Value * `Births (thousands)`, na.rm = TRUE) / sum(`Births (thousands)`, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+#print(wc_calc)
+
+```
+Here's the result for the Weighted Coverage for both indicators by SDG U5MR Status 
+```{r print_wc}
+knitr::kable(wc_calc)
+```
+
+As now the data is ready visualization, I will simply plot it. I used Bar-Chart for this purpose - which is the best for comparing data side by side (On/Off countries). 
+
+Here's the required visualization (Bar Chart)
+
+```{r bar_chart_weighted_coverage, fig.width= 8, fig.height= 5, message = FALSE, results='asis'}
+# GGPLOT2 is used - X Axis will show Indicator - Y will show Weighted Coverage filled by different colors of On/Off
+# First let's reorder the Data-Set so we can plot the on/off track correctly
+wc_calc$SDG_Status_U5MR <- factor(wc_calc$SDG_Status_U5MR, levels = c("On Track", "Off Track"))
+ggplot(wc_calc, aes(x = Indicator, y = Weighted_Coverage, fill = SDG_Status_U5MR)) +
+  labs(title = "Weighted Coverage of Countries by Indicator and SDG Status of U5 Mortality Rate Target", 
+       x = "Indicator",
+       y = "Weighted Coverage",
+       fill = "SDG Status U5MR") +
+  # make it a bar type - use the actual values of the Y axis (Weighted_Coverage) and place it side by side
+  geom_bar(stat = "identity", position = "dodge") +
+  # add data labels - round the values to 1 decimal point
+  geom_text(aes(label = round(Weighted_Coverage, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5) + 
+  # Manually set the colors for the bars
+  scale_fill_manual(
+    values = c("On Track" = "#09a3cd", "Off Track" = "#e45b5b"),
+    breaks = c("On Track", "Off Track")  # Order the legend
+  ) +
+  theme_classic() +
+  # place the legend on the top
+  theme(legend.position = "top")
+
+```
