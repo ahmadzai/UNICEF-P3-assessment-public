@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = FALSE,
 
 ```{r packages, warning=FALSE, message=FALSE, echo=FALSE}
 
-## Install function to install and load multiple R packages.
+## function to install and load multiple R packages.
 ## check to see if packages are installed. Install them if they are not, then load them into the R session
 
 install <- function(pkg){
@@ -37,13 +37,14 @@ install <- function(pkg){
 In task one, although all the data-sets were already existed in the `01_rawdata`, and the [LINK](https://data.unicef.org/resources/data_explorer/unicef_f/?ag=UNICEF&df=GLOBAL_DATAFLOW&ver=1.0&dq=.MNCH_ANC4+MNCH_SAB.&startPeriod=2018&endPeriod=2022) was also provided for the external data-set. Normally the data can be pulled from webpages and URLs with simple `R Script` or HTTP requests. However, in this case I browsed the URL in a browser and downloaded the data in an Excel file (from the download option on the page) and I also added the Excel file in the `01_rawdata` folder. The reason was that reading data from a URL which loads data dynamically using JavaScript/AJAX, that needed some advanced techniques and some libraries that needed to be compiled locally e.g., `RSelenium` and some others, and I thought that might not be needed for this exercise. In a real word, this data can be extracted from the Indicator Data Warehouse (SDMX). 
 
 ```{r common_packages, warning=FALSE, message=FALSE, echo=FALSE}
-# Load the common packages for this exercise
-invisible(install(c("readxl", "dplyr", "tidyverse", "stringr")))
+# Load the common packages for this exercise - in invisible mode
+invisible(install(c("readxl", "tidyverse", "lubridate")))
 
 ```
 
 ### Step1: 
-Load, clean and transform the Data downloaded from the DATA.UNICEF.ORG Webiste (Provided URL)
+Load, clean and transform the Data downloaded from the DATA.UNICEF.ORG Website (Provided URL) <br>
+Here's a sample of the data:
 
 ```{r load_wh_data, echo=FALSE}
 
@@ -63,13 +64,14 @@ anc_sub_data <- anc_sub_data %>%
   mutate(Latest_Value = coalesce(`2022`, `2021`, `2020`, `2019`, `2018`))
 
 # Show a sample of the data
-# let's make the table a bit nicer
-knitr::kable(head(anc_sub_data))
+# let's make the table a bit nicer and show only 5 rows
+knitr::kable(head(anc_sub_data, n = 5))
 
 ```
 
 ### Step 2:
-Load the SDG Status Analysis of Under5 Mortality Target by Countries, clean and transform as needed and merge it with the `ANC & SUB Indicators Data`, prepared above
+Load the SDG Status Analysis of Under5 Mortality Target by Countries, clean and transform as needed and merge it with the `ANC & SUB Indicators Data`, prepared above. <br>
+Here's a sample of the loaded data:
 
 ```{r load_sdg_on_off_data, echo=FALSE}
 # Load On-Off-Track Data
@@ -80,13 +82,14 @@ knitr::kable(head(on_off_track_sdgs))
 
 ```
 
-Print a sample of the merged data:
+Below is a sample of the merged data:
 ```{r merge_data, echo=FALSE}
 
 # Now merging the two data-sets, will need left join, because in our indicators data set we have extra locations' categories (Africa, America, etc. etc.), Which we don't have in the ON-OFF Track SDGs data, which is only by Country - so everything from the first data-set will be included and matched ones from the second data-set. 
 merged_dataset <- left_join(anc_sub_data, on_off_track_sdgs, by = c("Country" = "OfficialName"))
 
-knitr::kable(head(merged_dataset))
+# only 5 rows
+knitr::kable(head(merged_dataset, n=5))
 
 ```
 
@@ -145,7 +148,7 @@ wc_calc <- merged_dataset %>%
 #print(wc_calc)
 
 ```
-Here's the result for the Weighted Coverage for both indicators by SDG U5MR Status 
+Here's the result for the Weighted Coverage for both indicators by SDG U5MR Status:
 ```{r print_wc}
 knitr::kable(wc_calc)
 ```
@@ -179,3 +182,367 @@ ggplot(wc_calc, aes(x = Indicator, y = Weighted_Coverage, fill = SDG_Status_U5MR
   theme(legend.position = "top")
 
 ```
+
+## Task 2 - Solution (Data Perspective)
+As required for this task, the MICS Survey data is loaded, transformed and evaluated. As a first step, the data has been loaded, making sure that all variables (columns) in the data-set has correct data-types, and then some basic summary analysis of the data-set has been performed, before analyzing the key aspects (areas) as requested. 
+
+```{r load_zim_mics_data}
+
+# vector to store questions labels and codebook, can be used later
+
+questions <- c(
+  EC6 = "Can (name) identify or name at least ten letters of the alphabet?", 
+  EC7 = "Can (name) read at least four simple, popular words?",
+  EC8 = "Does (name) know the name and recognize the symbol of all numbers from 1 to 10?",
+  EC9 = "Can (name) pick up a small object with two fingers, like a stick or a rock from the ground?",
+  EC10 = "Is (name) sometimes too sick to play?", 
+  EC11 = "Does (name) follow simple directions on how to do something correctly?", 
+  EC12 = "When given something to do, is (name) able to do it independently?", 
+  EC13 = "Does (name) get along well with other children?", 
+  EC14 = "Does (name) kick, bite, or hit other children or adults?", 
+  EC15 = "Does (name) get distracted easily?"
+)
+# Load the data
+zim_mics_data <- read.csv("01_rawdata/Zimbabwe_children_under5_interview.csv")
+
+summary(zim_mics_data)
+
+```
+
+From the Summary Analysis above, it's clear that some variables data types are incorrect (interview_data, child_birthday), since one of the requirement of this task is to analyze the areas of interest in consideration of time (time series analysis) and for that it's needed to keep the data in the correct format. Secondly, the categories will also be replaced with their textual representation, so the data can be more readable. 
+A new variable is added to the data-set (month) in `2018-12` format, that's extracted from the interview data. For this analysis, it's assumed that repeated interviews were taken in the same locations in different months, to observe children growth.  
+
+```{r zim_mics_data_transform}
+
+# Convert the character string to a date format
+zim_mics_data$interview_date <- as.Date(zim_mics_data$interview_date, format = "%Y-%m-%d")
+zim_mics_data$child_birthday <- as.Date(zim_mics_data$child_birthday, format = "%Y-%m-%d")
+
+# Extract the month from the interview_date
+zim_mics_data$month <- format(zim_mics_data$interview_date, "%Y-%m")
+
+# Convert categorical variables to factors with labels
+categorical_vars <- c("EC6", "EC7", "EC8", "EC9", "EC10", "EC11", "EC12", "EC13", "EC14", "EC15")
+
+# replace the categorical variables with the respective labels. 
+zim_mics_data[categorical_vars] <- lapply(zim_mics_data[categorical_vars], factor, levels = c(1, 2, 8), labels = c("Yes", "No", "DK"))
+
+# print a sample of the transformed data
+knitr::kable(head(zim_mics_data, n=5))
+
+```
+
+### Methodology
+
+For the analysis of the data, a form of time-series analysis method is used, because the indicators (children growth in specified areas) need to be looked up month by month. As mentioned above, the interview date will be considered as a date variable (in our case month) and based on that the other variables (indicators) will be analyzed. Trend charts (stacked bar) are created for the specified educational areas, and the responses (categories of responses) will be used to evaluate the distribution of response (by category) in each month. Proportion for each category of the responses are highlighted. 
+
+### Learning and Simple Math Skills:
+EC6: Can (name) identify or name at least ten letters of the alphabet? <br>
+EC7: Can (name) read at least four simple, popular words? <br>
+EC8: Does (name) know the name and recognize the symbol of all numbers from 1 to 10? <br>
+
+```{r learning_math, fig.width= 9, fig.height= 4, message = FALSE, results='asis'}
+# Prepare the data
+literacy_math <- zim_mics_data %>%
+  # only select the 3 related vars and month columns
+  select(month, EC6, EC7, EC8) %>%
+  # change the data to longer format
+  pivot_longer(cols = c(EC6, EC7, EC8), names_to = "question", values_to = "response") %>%
+  # group by and summarise (count) the responses categories and then ungroup
+  group_by(month, question, response) %>%
+  # summarize and add a count to the dataframe
+  summarise(count = n(), .groups = 'drop') %>%
+  # another group by to find total responses in each month for the propotion calculation 
+  group_by(month, question) %>%
+  # add columns to show the proportion (by each category) and total (by month/question)
+  mutate(proportion = count / sum(count),
+         total = sum(count)) %>%
+  ungroup()
+
+# replace the coded questions to the real-text
+literacy_math <- literacy_math %>% 
+  rowwise() %>%
+  mutate(question = ifelse(question == "EC6", questions["EC6"],
+                                ifelse(question == "EC7", questions["EC7"],
+                                       ifelse(question == "EC8", questions["EC8"], question))))
+
+# Reorder the levels of response for correct stacking and legend order, 
+# which will display as (Yes, No, DK and NA)
+literacy_math$response <- factor(literacy_math$response, levels = c("NA", "DK", "No", "Yes"))
+# Sort the data to enforce the stacking order
+literacy_math <- literacy_math %>%
+  arrange(month, question, response)
+
+
+# Plot the data, fill by response and group the stack by response categories as well
+ggplot(literacy_math, aes(x = month, y = proportion, fill = response, group = response)) +
+  # bar chart - stat is the identity which will take the proportion value
+  # fill will make sure to reach to 100% and then each group will stack on top of each
+  # other which will represent the proportion of each category
+  geom_bar(stat = "identity", position = "fill") +
+  
+  # now we have 3 questions, let's create multiple plots by providing the question param to below 
+  # facet_wrap function with ~ also show the questions text on top of the chart - wrap it if longer than 40 chars
+  facet_wrap(~question, labeller = labeller(question = function(x) str_wrap(x, width = 40))) +
+  
+  # Set the titles (title/axis labels)
+  labs(title = "Trends of Learning and Simple Math Skills during the months of Interview",
+       x = "Year - Month",
+       y = "Proportion of Responses",
+       fill = "Response") +
+  # manually specify the colors to each category
+  scale_fill_manual(
+    values = c("NA" = "grey", "DK" = "#fbc449", "No" = "#e45b5b", "Yes" = "#09a3cd" ),
+    breaks = c("Yes", "No", "DK", "NA")  # Order the legend as Yes, No, DK, NA
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5)) +
+  
+  # Add total count at the top of each bar
+  geom_text(aes(label = total, y = 1.05), 
+            vjust = 0, size = 3, color = "black") +
+  
+  # Add category-specific counts inside each section
+  geom_text(aes(label = count), 
+            position = position_stack(vjust = 0.5), size = 3, color = "white")
+
+
+
+```
+
+### Physical:
+EC9: Can (name) pick up a small object with two fingers, like a stick or a rock from the ground? <br>
+EC10: Is (name) sometimes too sick to play? <br>
+
+```{r physical, fig.width= 9, fig.height= 4, message = FALSE, results='asis'}
+
+# Prepare the data
+physical <- zim_mics_data %>%
+  # only select the 2 related vars and month columns
+  select(month, EC9, EC10) %>%
+  # change the data to longer format
+  pivot_longer(cols = c(EC9, EC10), names_to = "question", values_to = "response") %>%
+  # group by and summarise (count) the responses categories and then ungroup
+  group_by(month, question, response) %>%
+  # summarize and add a count to the dataframe
+  summarise(count = n(), .groups = 'drop') %>%
+  # another group by to find total responses in each month for the propotion calculation 
+  group_by(month, question) %>%
+  # add columns to show the proportion (by each category) and total (by month/question)
+  mutate(proportion = count / sum(count),
+         total = sum(count)) %>%
+  ungroup()
+
+# replace the coded questions to the real-text
+physical <- physical %>% 
+  rowwise() %>%
+  mutate(question = ifelse(question == "EC9", questions["EC9"],
+                                ifelse(question == "EC10", questions["EC10"],
+                                        question)))
+
+# Reorder the levels of response for correct stacking and legend order, 
+# which will display as (Yes, No, DK and NA)
+physical$response <- factor(physical$response, levels = c("NA", "DK", "No", "Yes"))
+# Sort the data to enforce the stacking order
+physical <- physical %>%
+  arrange(month, question, response)
+
+
+# Plot the data, fill by response and group the stack by response categories as well
+ggplot(physical, aes(x = month, y = proportion, fill = response, group = response)) +
+  # bar chart - stat is the identity which will take the proportion value
+  # fill will make sure to reach to 100% and then each group will stack on top of each
+  # other which will represent the proportion of each category
+  geom_bar(stat = "identity", position = "fill") +
+  
+  # now we have 3 questions, let's create multiple plots by providing the question param to below 
+  # facet_wrap function with ~ also show the questions text on top of the chart - wrap it if longer than 60 chars
+  facet_wrap(~question, labeller = labeller(question = function(x) str_wrap(x, width = 50))) +
+  
+  # Set the titles (title/axis labels)
+  labs(title = "Trends of Physical Skills during the months of Interview",
+       x = "Year - Month",
+       y = "Proportion of Responses",
+       fill = "Response") +
+  # manually specify the colors to each category
+  scale_fill_manual(
+    values = c("NA" = "grey", "DK" = "#fbc449", "No" = "#e45b5b", "Yes" = "#09a3cd" ),
+    breaks = c("Yes", "No", "DK", "NA")  # Order the legend as Yes, No, DK, NA
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5)) +
+  
+  # Add total count at the top of each bar
+  geom_text(aes(label = total, y = 1.05), 
+            vjust = 0, size = 3, color = "black") +
+  
+  # Add category-specific counts inside each section
+  geom_text(aes(label = count), 
+            position = position_stack(vjust = 0.5), size = 3, color = "white")
+
+
+```
+
+### Learning:
+EC11: Does (name) follow simple directions on how to do something correctly? <br>
+EC12: When given something to do, is (name) able to do it independently? <br>
+
+```{r learning, fig.width= 9, fig.height= 4, message = FALSE, results='asis'}
+
+# Prepare the data
+learning <- zim_mics_data %>%
+  # only select the 2 related vars and month columns
+  select(month, EC11, EC12) %>%
+  # change the data to longer format
+  pivot_longer(cols = c(EC11, EC12), names_to = "question", values_to = "response") %>%
+  # group by and summarise (count) the responses categories and then ungroup
+  group_by(month, question, response) %>%
+  # summarize and add a count to the dataframe
+  summarise(count = n(), .groups = 'drop') %>%
+  # another group by to find total responses in each month for the propotion calculation 
+  group_by(month, question) %>%
+  # add columns to show the proportion (by each category) and total (by month/question)
+  mutate(proportion = count / sum(count),
+         total = sum(count)) %>%
+  ungroup()
+
+# replace the coded questions to the real-text
+learning <- learning %>% 
+  rowwise() %>%
+  mutate(question = ifelse(question == "EC11", questions["EC11"],
+                                ifelse(question == "EC12", questions["EC12"],
+                                        question)))
+
+# Reorder the levels of response for correct stacking and legend order, 
+# which will display as (Yes, No, DK and NA)
+learning$response <- factor(learning$response, levels = c("NA", "DK", "No", "Yes"))
+# Sort the data to enforce the stacking order
+learning <- learning %>%
+  arrange(month, question, response)
+
+
+# Plot the data, fill by response and group the stack by response categories as well
+ggplot(learning, aes(x = month, y = proportion, fill = response, group = response)) +
+  # bar chart - stat is the identity which will take the proportion value
+  # fill will make sure to reach to 100% and then each group will stack on top of each
+  # other which will represent the proportion of each category
+  geom_bar(stat = "identity", position = "fill") +
+  
+  # now we have 3 questions, let's create multiple plots by providing the question param to below 
+  # facet_wrap function with ~ also show the questions text on top of the chart - wrap it if longer than 60 chars
+  facet_wrap(~question, labeller = labeller(question = function(x) str_wrap(x, width = 50))) +
+  
+  # Set the titles (title/axis labels)
+  labs(title = "Trends of Learning Skills during the months of Interview",
+       x = "Year - Month",
+       y = "Proportion of Responses",
+       fill = "Response") +
+  # manually specify the colors to each category
+  scale_fill_manual(
+    values = c("NA" = "grey", "DK" = "#fbc449", "No" = "#e45b5b", "Yes" = "#09a3cd" ),
+    breaks = c("Yes", "No", "DK", "NA")  # Order the legend as Yes, No, DK, NA
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5)) +
+  
+  # Add total count at the top of each bar
+  geom_text(aes(label = total, y = 1.05), 
+            vjust = 0, size = 3, color = "black") +
+  
+  # Add category-specific counts inside each section
+  geom_text(aes(label = count), 
+            position = position_stack(vjust = 0.5), size = 3, color = "white")
+```
+
+### Socio-emotional:
+EC13: Does (name) get along well with other children? <br>
+EC14: Does (name) kick, bite, or hit other children or adults? <br>
+EC15: Does (name) get distracted easily? <br>
+
+```{r socio_emotional, fig.width= 9, fig.height= 4, message = FALSE, results='asis'}
+# Prepare the data
+socio_emotional <- zim_mics_data %>%
+  # only select the 3 related vars and month columns
+  select(month, EC13, EC14, EC15) %>%
+  # change the data to longer format
+  pivot_longer(cols = c(EC13, EC14, EC15), names_to = "question", values_to = "response") %>%
+  # group by and summarise (count) the responses categories and then ungroup
+  group_by(month, question, response) %>%
+  # summarize and add a count to the dataframe
+  summarise(count = n(), .groups = 'drop') %>%
+  # another group by to find total responses in each month for the propotion calculation 
+  group_by(month, question) %>%
+  # add columns to show the proportion (by each category) and total (by month/question)
+  mutate(proportion = count / sum(count),
+         total = sum(count)) %>%
+  ungroup()
+
+# replace the coded questions to the real-text
+socio_emotional <- socio_emotional %>% 
+  rowwise() %>%
+  mutate(question = ifelse(question == "EC13", questions["EC13"],
+                                ifelse(question == "EC14", questions["EC14"],
+                                       ifelse(question == "EC15", questions["EC15"], question))))
+
+# Reorder the levels of response for correct stacking and legend order, 
+# which will display as (Yes, No, DK and NA)
+socio_emotional$response <- factor(socio_emotional$response, levels = c("NA", "DK", "No", "Yes"))
+# Sort the data to enforce the stacking order
+socio_emotional <- socio_emotional %>%
+  arrange(month, question, response)
+
+
+# Plot the data, fill by response and group the stack by response categories as well
+ggplot(socio_emotional, aes(x = month, y = proportion, fill = response, group = response)) +
+  # bar chart - stat is the identity which will take the proportion value
+  # fill will make sure to reach to 100% and then each group will stack on top of each
+  # other which will represent the proportion of each category
+  geom_bar(stat = "identity", position = "fill") +
+  
+  # now we have 3 questions, let's create multiple plots by providing the question param to below 
+  # facet_wrap function with ~ also show the questions text on top of the chart - wrap it if longer than 40 chars
+  facet_wrap(~question, labeller = labeller(question = function(x) str_wrap(x, width = 40))) +
+  
+  # Set the titles (title/axis labels)
+  labs(title = "Trends of Socio-Emotional Skills during the months of Interview",
+       x = "Year - Month",
+       y = "Proportion of Responses",
+       fill = "Response") +
+  # manually specify the colors to each category
+  scale_fill_manual(
+    values = c("NA" = "grey", "DK" = "#fbc449", "No" = "#e45b5b", "Yes" = "#09a3cd" ),
+    breaks = c("Yes", "No", "DK", "NA")  # Order the legend as Yes, No, DK, NA
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top", plot.title = element_text(hjust = 0.5)) +
+  
+  # Add total count at the top of each bar
+  geom_text(aes(label = total, y = 1.05), 
+            vjust = 0, size = 3, color = "black") +
+  
+  # Add category-specific counts inside each section
+  geom_text(aes(label = count), 
+            position = position_stack(vjust = 0.5), size = 3, color = "white")
+
+
+
+```
+
+### Key Findings
+The trends analysis shows the regular progress children make in literacy, math, physical, learning and socio-emotional skills between the ages of 3 and 4. However, some physical (health related indicators) shows variability, which could be because of seasonal sickness, but that need attention both from parents and teachers side in school. Some key findings are listed below:
+
+* **Literacy and Math**: The analysis shows children's ability to recognize letters, words, and numbers improves month by month.
+
+* **Physical**: Trends of Physical Skills improvement shows some variability, that could be because of the seasonal factors (seasonal sickness), but that still need some attention
+
+* **Learning**: The Learning Skills analysis indicates that there's an improvement over time, it tells us that children are gaining confidence and cognitive abilities as they grow.
+
+* **Socio-emotional**: These Skills are also improved over time as the data shows, however, the tendency to get distracted remains high.
+
+<br>
+<br>
+
+**Thank You**
+
+
+
